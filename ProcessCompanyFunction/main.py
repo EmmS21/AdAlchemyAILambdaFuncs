@@ -22,9 +22,10 @@ def send_notifications(email_address, message_subject, message_body):
     has completed its work and the results are ready for review.
     """
     ses_client = boto3.client('ses', region_name='us-east-2')
+    source_email = os.environ.get('EMAIL')
 
     ses_client.send_email(
-        Source='emmanuel@adalchemy.com',  
+        Source=source_email,  
         Destination={
             'ToAddresses': [email_address],
         },
@@ -130,10 +131,12 @@ async def process_company(event, context):
         'MONGO_URI': os.environ.get('MONGO_URI'),
         'WEBSITE_URL': os.environ.get('WEBSITE_URL'),
         'DLQ_URL': os.environ.get('DLQ_URL'),
-        'MONGO_COLLECTION_NAME': os.environ.get('MONGO_COLLECTION_NAME')
+        'MONGO_COLLECTION_NAME': os.environ.get('MONGO_COLLECTION_NAME'),
+        'STEP_FUNCTION_ARN': os.environ.get('STEP_FUNCTION_ARN')
     }
 
     sqs_client = boto3.client('sqs')
+    sfn_client = boto3.client('stepfunctions')
 
     for record in event['Records']:
         company_data = json.loads(record['body'])
@@ -152,12 +155,14 @@ async def process_company(event, context):
                         print(f"Attempt {attempt + 1} failed for {business_name}. Retrying...")
                     else:
                         raise 
+
             # Write researcher output to MongoDB
             try:
                 result = await write_to_mongodb(output, env_vars['MONGO_URI'], env_vars['MONGO_COLLECTION_NAME'], business_name)
             except Exception as mongo_error:
                 print(f"Failed to write to MongoDB for {business_name}: {str(mongo_error)}", file=sys.stderr)
                 raise
+
             # Send notifications
             try:
                 message_subject = "AdAlchemyAI: Initial Research Completed"
@@ -167,6 +172,18 @@ async def process_company(event, context):
                 print(f"Failed to send notification for {business_name}: {str(notify_error)}", file=sys.stderr)
                 raise
             print(f"Processing complete for company: {business_name}")
+
+            # Start Step Functions execution
+            sfn_input = json.dumps({
+                'business_name': business_name,
+                'email': email_address
+            })
+            sfn_response = sfn_client.start_execution(
+                stateMachineArn=env_vars['STEP_FUNCTION_ARN'],
+                input=sfn_input
+            )
+            print(f"Started Step Functions execution for {business_name}: {sfn_response['executionArn']}")
+
         except Exception as e:
             print(f"Failed to process company {business_name}: {str(e)}", file=sys.stderr)
             # If all attempts fail, move the message to the Dead-Letter Queue (DLQ)

@@ -26,6 +26,40 @@ AdAlchemyAILambdaFuncs is a collection of AWS Lambda functions designed to autom
      - `DLQ_URL`: The URL of the Dead-Letter Queue (DLQ) to handle failed processing.
      - `MONGO_COLLECTION_NAME`: Name of the MongoDB collection to store the results.
 
+3. **DecisionMakerFunction**
+   - **File:** `decision_maker.py`
+   - **Description:**
+     - This function determines the appropriate marketing strategy for a business by interacting with a Modal AI Agent. The function stores the generated keywords and ad text variations in a MongoDB collection named after the business.
+   - **Environment Variables:**
+     - `MONGO_URI`: MongoDB connection URI.
+     - `WEBSITE_URL`: The URL of the Modal AI agent that generates marketing strategies.
+
+   - **Workflow:**
+     1. The function checks for the `business_name` parameter in the event.
+     2. It connects to MongoDB using the connection string stored in the `MONGO_URI` environment variable.
+     3. If a collection with the business name doesn't exist, it creates one.
+     4. The function calls the Modal AI Agent to generate marketing strategies.
+     5. It cleans and parses the AI agent's JSON response.
+     6. The parsed data is stored in the corresponding MongoDB collection.
+     7. The MongoDB connection is closed after the operation.
+
+### Step Functions - Not included in the repo
+
+1. **DecisionMakingStepFunction**
+   - **Description:**
+     - This Step Function orchestrates the decision-making process by waiting for 3 minutes before invoking the `DecisionMakerFunction`. It is designed to handle any failures during the decision-making process, retrying twice before recording a failure.
+   - **Workflow:**
+     1. **Wait For Decision:**
+        - The state machine starts by waiting for 3 minutes (`180 seconds`).
+     2. **Decision Making:**
+        - After the wait period, it invokes the `DecisionMakerFunction` using its ARN. The function is passed the `business_name` and `email` from the input.
+     3. **Retry Logic:**
+        - If the task fails, it retries up to two times with a 30-second interval between retries, doubling the wait time for each subsequent retry.
+     4. **Failure Handling:**
+        - If all retries fail, the state machine transitions to the `Record Failure` state, where it logs that the decision-making process failed.
+     5. **End States:**
+        - The state machine ends either after successful decision making or after recording a failure.
+
 ## Setup
 
 ### Prerequisites
